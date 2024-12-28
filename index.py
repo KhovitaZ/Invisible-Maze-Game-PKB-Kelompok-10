@@ -23,6 +23,10 @@ game_over_sound = pygame.mixer.Sound('./sound/game_over.mp3')
 time_up_sound = pygame.mixer.Sound('./sound/time_up.mp3')
 backsouund = pygame.mixer.Sound('./sound/backsound.mp3')
 
+# Load compass image
+COMPASS_IMAGE = pygame.image.load('./compas.png')
+# COMPASS_SIZE = (100, 100)  # Resize compass to 100x100
+# COMPASS_IMAGE = pygame.transform.scale(COMPASS_IMAGE, COMPASS_SIZE)
 
 # Colors
 COLORS = {
@@ -41,6 +45,7 @@ pygame.font.init()
 FONT_SMALL = pygame.font.Font(None, 24)
 FONT_MEDIUM = pygame.font.Font(None, 32)
 FONT_LARGE = pygame.font.Font(None, 48)
+  
 
 def initialize_game(level):
     size = BASE_WIDTH + level * 2
@@ -74,13 +79,41 @@ def generate_maze(size):
     
     return maze
 
+def bfs_path(maze, start, end):
+    """Find the shortest path in a maze using BFS."""
+    from collections import deque
+
+    queue = deque([(start, [])])
+    visited = set()
+    visited.add(tuple(start))
+
+    while queue:
+        (x, y), path = queue.popleft()
+
+        # Check if we've reached the end
+        if [x, y] == end:
+            return path + [(x, y)]
+
+        # Explore neighbors
+        for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < len(maze[0]) and 0 <= ny < len(maze) and maze[ny][nx] == 0 and (nx, ny) not in visited:
+                queue.append(((nx, ny), path + [(x, y)]))
+                visited.add((nx, ny))
+
+    return []  # Return empty path if no solution
+
 def display_maze_pygame(size):
     screen_width = size * TILE_SIZE + 200  # Extra space for UI elements
     screen_height = size * TILE_SIZE + 100  # Extra space for UI elements
     screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
     pygame.display.set_caption("Invisible Maze Adventure")
     clock = pygame.time.Clock()
-    
+
+    # Load the compass image
+    compass_image = pygame.image.load('./compas.png')  # Adjust the path if needed
+    compass_image = pygame.transform.scale(compass_image, (100, 100))  # Scale if necessary
+
     def draw_maze(maze, show_walls=True):
         for y in range(size):
             for x in range(size):
@@ -90,8 +123,18 @@ def display_maze_pygame(size):
                 else:
                     pygame.draw.rect(screen, COLORS['path'], rect)
                 pygame.draw.rect(screen, COLORS['background'], rect, 1)  # Grid lines
+        
+        # # Draw the compass image at the bottom-right corner
+        # screen.blit(compass_image, (screen_width + 500, screen_height - 410))
     
-    def draw_objects(player_pos, treasure_pos):
+    def draw_objects(player_pos, treasure_pos, solution_path=None):
+        # Highlight solution path if provided
+        if solution_path:
+            for (x, y) in solution_path:
+                rect = pygame.Rect(x * TILE_SIZE + 50, y * TILE_SIZE + 50, TILE_SIZE, TILE_SIZE)
+                pygame.draw.rect(screen, COLORS['timer'], rect)
+
+
         player_rect = pygame.Rect(player_pos[0] * TILE_SIZE + 50, player_pos[1] * TILE_SIZE + 50, TILE_SIZE, TILE_SIZE)
         treasure_rect = pygame.Rect(treasure_pos[0] * TILE_SIZE + 50, treasure_pos[1] * TILE_SIZE + 50, TILE_SIZE, TILE_SIZE)
         
@@ -112,7 +155,24 @@ def display_maze_pygame(size):
         health_fill_rect = health_bar_rect.copy()
         health_fill_rect.width = health_fill_rect.width * (health / INITIAL_HEALTH)
         pygame.draw.rect(screen, COLORS['health'], health_fill_rect)
+
+    def draw_compass_button():
+        text = FONT_MEDIUM.render(f'butuh bantuan? ', True, COLORS['timer'])
+        screen.blit(text, (screen_width + 200, 220))
     
+        button_width, button_height = 120, 120  # Ukuran tombol kompas
+        button_x = screen_width + 200
+        button_y = screen_height - 290
+
+        # Mengubah ukuran gambar kompas agar sesuai dengan tombol
+        scaled_compass_image = pygame.transform.scale(COMPASS_IMAGE, (button_width, button_height))
+
+        # Gambar gambar kompas
+        screen.blit(scaled_compass_image, (button_x, button_y))
+
+        # Mengembalikan pygame.Rect untuk collision check
+        return pygame.Rect(button_x, button_y, button_width, button_height)
+
     def draw_timer(remaining_time):
         text = FONT_MEDIUM.render(f'Time: {remaining_time}', True, COLORS['timer'])
         screen.blit(text, (screen_width + 200, 140))
@@ -122,59 +182,60 @@ def display_maze_pygame(size):
         timer_fill_rect = timer_bar_rect.copy()
         timer_fill_rect.width = timer_fill_rect.width * (remaining_time / TIMER_LIMIT)
         pygame.draw.rect(screen, COLORS['timer'], timer_fill_rect)
+
+        # screen.blit(compass_image, (screen_width + 500, screen_height - 410))
     
     def draw_level(level):
         text = FONT_LARGE.render(f'Level {level}', True, COLORS['text'])
         screen.blit(text, (screen_width // 2 - text.get_width() // 2, 10))
-    
-    return screen, draw_maze, draw_objects, draw_health, draw_timer, draw_level, clock
+       
+    return screen, draw_maze, draw_objects, draw_health, draw_compass_button, draw_timer, draw_level,  clock
 
 def play_level(level, reset_health=True):
     player_pos, treasure_pos, health, size = initialize_game(level)
     maze = generate_maze(size)
-    
-    screen, draw_maze, draw_objects, draw_health, draw_timer, draw_level, clock = display_maze_pygame(size)
-    
+
+    screen, draw_maze, draw_objects, draw_health, draw_compass_button, draw_timer, draw_level, clock = display_maze_pygame(size)
+    solution_path = None  # Jalur BFS
+    solution_start_time = None  # Waktu mulai menampilkan solusi
+
     if not reset_health:
         health = INITIAL_HEALTH
-    
-    # Memorization phase
+
+    # Fase Memorization
     start_time = time.time()
-    memorization_time = 30
-    
+    memorization_time = 5
+
     while time.time() - start_time < memorization_time:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return "quit"
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    if show_quit_confirmation(screen):
-                        return "quit"
-        
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                if show_quit_confirmation(screen):
+                    return "quit"
+
         remaining_time = memorization_time - int(time.time() - start_time)
-        
         screen.fill(COLORS['background'])
         draw_maze(maze, show_walls=True)
         draw_objects(player_pos, treasure_pos)
         draw_health(health)
         draw_timer(remaining_time)
         draw_level(level)
-        
+
         text = FONT_MEDIUM.render(f"Memorize the maze! {remaining_time} seconds left", True, COLORS['text'])
         screen.blit(text, (screen.get_width() // 2 - text.get_width() // 2, screen.get_height() - 40))
-        
         pygame.display.flip()
         clock.tick(FPS)
-    
-    # Gameplay phase
+
+    # Fase Gameplay
     game_start_time = time.time()
     running = True
     wall_break_warning = ""
-    
+
     while running:
         elapsed_time = time.time() - game_start_time
         remaining_time = max(0, TIMER_LIMIT - int(elapsed_time))
-        
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return "quit"
@@ -189,33 +250,47 @@ def play_level(level, reset_health=True):
                         wall_break_warning = "Ouch! You hit a wall!" if wall_break else ""
                     else:
                         wall_break_warning = ""
-                    
+
                     if check_win(player_pos, treasure_pos):
                         show_win_screen(screen, level)
                         return True
-                    
+
                     if health <= 0:
                         show_game_over_screen(screen)
                         return False
-        
+
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_pos = pygame.mouse.get_pos()
+                compass_button_rect = draw_compass_button()
+                if compass_button_rect.collidepoint(mouse_pos):
+                    # Klik tombol kompas, mulai menghitung waktu untuk solusi
+                    solution_start_time = time.time()
+                    solution_path = bfs_path(maze, player_pos, treasure_pos)  # Jalankan BFS
+
+        # Cek jika solusi sudah ditampilkan selama 5 detik, jika ya, sembunyikan solusi
+        if solution_start_time and time.time() - solution_start_time > 5:
+            solution_path = None  # Hapus solusi setelah 5 detik
+            solution_start_time = None  # Reset waktu
+
         if remaining_time <= 0:
             show_time_up_screen(screen)
             return False
-        
+
         screen.fill(COLORS['background'])
         draw_maze(maze, show_walls=False)
-        draw_objects(player_pos, treasure_pos)
+        draw_objects(player_pos, treasure_pos, solution_path)
         draw_health(health)
         draw_timer(remaining_time)
         draw_level(level)
-        
+        draw_compass_button()
+
         if wall_break_warning:
             text = FONT_MEDIUM.render(wall_break_warning, True, COLORS['health'])
             screen.blit(text, (screen.get_width() // 2 - text.get_width() // 2, screen.get_height() - 40))
-        
+
         pygame.display.flip()
         clock.tick(FPS)
-    
+
     return False
 
 def move_player(player_pos, direction, maze, size):
@@ -307,6 +382,7 @@ def main():
             time.sleep(2)
     
     pygame.quit()
+    
 
 if __name__ == "__main__":
     main()
